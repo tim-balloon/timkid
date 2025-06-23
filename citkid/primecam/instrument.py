@@ -387,7 +387,7 @@ class RFSOC:
                   self.bfile.a_tones_comb_cust['fname'], self.bfile.p_tones_comb_cust['fname']] 
         for f, bf in zip(files, bfiles):
             local_path = self.tmp_directory + f
-            remote_path = f"{git_path}/drones/drone{self.drid}/{bf}.npy"
+            remote_path = f"{git_path}/drones/drone{self.drid}/custom_comb/{bf}.npy"
             print(local_path, remote_path)
             if attmpt_scp:
                 scp.put(local_path, remote_path, confirm = False)
