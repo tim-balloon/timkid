@@ -26,7 +26,7 @@ class RFSOC:
         """
         # Create tmp and log directories
         directory = fix_path(os.getcwd())
-        self.tmp_directory = directory + 'tmp/' + 'drone' + str(drid) + '/'
+        self.tmp_directory = directory + 'tmp/'
         self.log_directory = '/'.join(directory.split('/')[:-2]) + '/'+ 'logs/'
         for d in (self.tmp_directory, self.log_directory):
             os.makedirs(d, exist_ok = True)
@@ -37,11 +37,12 @@ class RFSOC:
         sys.path.insert(1,
             os.path.abspath(os.path.expanduser(local_primecam_path)))
         from queen import alcoveCommand
-        from alcove_commands.tones import genPhis
+        from alcove_commands.tones import genAmpsAndPhis, genPhis
         from alcove import comNumFromStr
         from alcove_commands.board_io import file
         self.comNumFromStr = comNumFromStr
         self.alcoveCommand = alcoveCommand
+        self.genAmpsAndPhis = genAmpsAndPhis
         self.genPhis = genPhis
         self.bfile = file
         # Set system variables
@@ -387,7 +388,7 @@ class RFSOC:
                   self.bfile.a_tones_comb_cust['fname'], self.bfile.p_tones_comb_cust['fname']] 
         for f, bf in zip(files, bfiles):
             local_path = self.tmp_directory + f
-            remote_path = f"{git_path}/drones/drone{self.drid}/{bf}.npy"
+            remote_path = f"{git_path}/drones/drone{self.drid}/custom_comb/{bf}.npy"
             print(local_path, remote_path)
             if attmpt_scp:
                 scp.put(local_path, remote_path, confirm = False)
@@ -395,6 +396,18 @@ class RFSOC:
         if attmpt_scp:
             scp.close()
         ssh.close()
+
+    def _get_if(self, fres):
+        """
+        Convert resonator frequencies to IF (intermediate frequencies) in Hz.
+
+        Parameters:
+        fres (np.array): Resonator frequencies in Hz
+
+        Returns:
+        np.array: IF frequencies in Hz
+        """
+        return np.array(fres) - self.lo_freq * 1e6
 
     def make_custom_tone_lists(self, fres, ares = None, pres = None, attmpt_scp=True):
         """
@@ -411,15 +424,68 @@ class RFSOC:
         amp_max = (2 ** 15 - 1)
         fres = np.array(fres)
         if ares is None:
-            N = len(fres)
-            ares = np.ones(N) * amp_max / np.sqrt(N) * 0.25
-        if pres is None:
-            pres = self.genPhis(fres * 1e-6, ares)
+            ares, pres = self.genAmpsAndPhis(self._get_if(fres))
+        elif pres is None:
+            pres = self.genPhis(self._get_if(fres), ares)
         for file, res in zip(['custom_freqs.npy', 'custom_amps.npy',
                               'custom_phis.npy'],
                              [fres, ares, pres]):
             np.save(self.tmp_directory + file, res)
         self.transfer_custom_tone_lists(attmpt_scp=attmpt_scp)
+
+    def set_atten(self, atten, direction):
+        """
+        Set the attenuation value for the specified direction.
+
+        Parameters:
+        atten (float): The attenuation value to set, in 0.25 dB increments (range: 0 to 31.75 dB).
+        direction (str): The direction for attenuation. Use 'drive' for the DAC side (signal output from RFSoC),
+                         or 'sense' for the DAC side (signal returning to RFSoC).
+        """
+        # Use the new attenuator board hardware command
+        com_num = self.comNumFromStr('setAtten2025')
+        args = str('direction=%s,atten=%1.2f' % (direction, atten))
+
+        with hidePrints():
+            response = self.alcoveCommand(
+                com_num,
+                bid=self.bid,
+                drid=self.drid,
+                all_boards=False,
+                args=args
+            )
+
+    def get_atten(self, direction):
+        """
+        Retrieve the attenuation value for the specified direction.
+
+        Parameters:
+            direction (str): Attenuation direction. Use 'drive' for the DAC side (signal output from RFSoC),
+                             or 'sense' for the ADC side (signal returning to RFSoC).
+
+        Returns:
+            float: The attenuation value in 0.25 dB increments (range: 0 to 31.75 dB).
+        """
+        com_num = self.comNumFromStr('getAtten')
+        args = str('direction=%s'%(direction))
+
+        with hidePrints():
+            response = self.alcoveCommand(
+                com_num,
+                bid=self.bid,
+                drid=self.drid,
+                all_boards=False,
+                args=args
+            )
+
+        # Extract the attenuation value from the response buffer
+        data_bytes = response[1][0]['data'][12:20]
+        atten = float(np.frombuffer(data_bytes, dtype='>f8')[0])
+        
+        # Handle the uninitialized state that occurs after an RFSoC restart
+        if np.isclose(atten, 63.75):
+            return -1
+        return atten
 
 def separate_iq_data(path):
     """
