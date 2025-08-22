@@ -12,7 +12,7 @@ def take_iq_noise(rfsoc, fres, ares, qres, fcal_indices, file_suffix,
                   noise_time = 200, fine_bw = 0.2, rough_bw = 0.2,
                   take_rough_sweep = False, fres_update_method = 'distance',
                   npoints_rough = 300, npoints_gain = 100, npoints_fine = 600,
-                  nnoise_timestreams = 1, N_accums = 5):
+                  nnoise_timestreams = 1, N_accums = 5, pres = None):
     """
     Takes IQ sweeps and noise. The LO frequency must already be set.
 
@@ -48,7 +48,7 @@ def take_iq_noise(rfsoc, fres, ares, qres, fcal_indices, file_suffix,
     np.save(rfsoc.out_directory + f'fcal_indices{file_suffix}.npy',
             fcal_indices)
     # write initial target comb
-    rfsoc.write_targ_comb_from_custom(fres, ares, pres = None)
+    rfsoc.write_targ_comb_from_custom(fres, ares, pres = pres)
     # rough sweep
     if take_rough_sweep:
         filename = f's21_rough{file_suffix}.npy'
@@ -60,7 +60,7 @@ def take_iq_noise(rfsoc, fres, ares, qres, fcal_indices, file_suffix,
         fres = update_fres(f, z, npoints = npoints,
                                fcal_indices = fcal_indices,
                                method = fres_update_method)
-        rfsoc.write_targ_comb_from_custom(fres, ares, pres = None)
+        rfsoc.write_targ_comb_from_custom(fres, ares, pres = pres)
     np.save(rfsoc.out_directory + f'fres{file_suffix}.npy', fres)
 
     # Gain Sweep
