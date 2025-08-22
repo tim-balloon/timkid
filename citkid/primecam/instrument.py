@@ -8,8 +8,13 @@ import shutil
 import paramiko
 import numpy as np
 from ..util import fix_path
-from . import _config
 import gc
+
+try:
+    # try to import private config first
+    from . import _config_private as _config
+except ImportError:
+    from . import _config
 
 class RFSOC:
     def __init__(self, out_directory, bid = 1, drid = 1,
