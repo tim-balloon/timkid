@@ -377,14 +377,16 @@ class RFSOC:
         ssh = paramiko.SSHClient()
         ssh.load_system_host_keys()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        # Connect to the xilinx board
+        # Connect to the xilinx board, ssh key or password
         hostname = _config.xilinx_ip
         port = _config.xilinx_sshport
         username = _config.xilinx_username
         password = _config.xilinx_password
+        key_path = _config.xilinx_key_path
         git_path = _config.xilinx_git_path
+
         if attmpt_scp:
-            ssh.connect(hostname, port, username, password)
+            ssh.connect(hostname, port, username, password, key_filename=key_path)
             # Transfer files to the board
             scp = ssh.open_sftp()
         files = ['custom_freqs.npy', 'custom_amps.npy', 'custom_phis.npy']
@@ -451,13 +453,8 @@ class RFSOC:
         args = str('direction=%s,atten=%1.2f' % (direction, atten))
 
         with hidePrints():
-            response = self.alcoveCommand(
-                com_num,
-                bid=self.bid,
-                drid=self.drid,
-                all_boards=False,
-                args=args
-            )
+            response = self.alcoveCommand(com_num, bid=self.bid, drid=self.drid, 
+                                    all_boards=False, args=args)
 
     def get_atten(self, direction):
         """
@@ -474,13 +471,8 @@ class RFSOC:
         args = str('direction=%s'%(direction))
 
         with hidePrints():
-            response = self.alcoveCommand(
-                com_num,
-                bid=self.bid,
-                drid=self.drid,
-                all_boards=False,
-                args=args
-            )
+            response = self.alcoveCommand(com_num, bid=self.bid, drid=self.drid, 
+                                    all_boards=False, args=args)
 
         # Extract the attenuation value from the response buffer
         data_bytes = response[1][0]['data'][12:20]
@@ -490,6 +482,31 @@ class RFSOC:
         if np.isclose(atten, 63.75):
             return -1
         return atten
+
+    def get_adc_rms(self):
+        """
+        Retrieve the RMS value of the ADC.
+
+        Returns:
+            float: The RMS value of the ADC.
+        """
+        com_num = self.comNumFromStr('getADCrms')
+        args = None
+
+        with hidePrints():
+            response = self.alcoveCommand(com_num, bid=self.bid, drid=self.drid, 
+                                    all_boards=False, args=args)
+
+        #Extract the RMS value from the response buffer
+        try:
+            import pickle
+            data_bytes = response[1][0]['data']
+            adc_rms = float(np.abs(pickle.loads(data_bytes)))
+        except Exception as e:
+            print(f"Error extracting ADC RMS: {e}")
+            adc_rms = -1
+        
+        return adc_rms
 
 def separate_iq_data(path):
     """
