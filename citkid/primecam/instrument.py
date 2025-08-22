@@ -18,7 +18,7 @@ except ImportError:
 
 class RFSOC:
     def __init__(self, out_directory, bid = 1, drid = 1,
-                 udp_ip = '192.168.3.40', noiseq = True,
+                 udp_ip = '192.168.3.40', noiseq = True, socktout=1,
                  local_primecam_path = '~/github/primecam_readout/'):
         """
         Send commands to the rfsoc and save the output data.
@@ -62,6 +62,7 @@ class RFSOC:
             # let multiple binds
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            self.sock.settimeout(socktout)
             self.sock.bind((udp_ip, 4096))
         self.sample_time = 5 / 2441
 
@@ -400,7 +401,7 @@ class RFSOC:
         for f, bf in zip(files, bfiles):
             local_path = self.tmp_directory + f
             remote_path = f"{git_path}/drones/drone{self.drid}/custom_comb/{bf}.npy"
-            print(local_path, remote_path)
+            # print(local_path, remote_path)
             if attmpt_scp:
                 scp.put(local_path, remote_path, confirm = False)
         # Close connection
