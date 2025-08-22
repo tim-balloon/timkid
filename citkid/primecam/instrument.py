@@ -457,7 +457,6 @@ def capturePacket(sock):
     Returns:
     packet (np.array): captured data
     """
-    # byteshift = -1
     data = sock.recv(9000) # buffer size is 9000 bytes
     data = bytearray(data)
     i, f = 0, 8191
