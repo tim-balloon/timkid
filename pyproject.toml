@@ -7,18 +7,20 @@ build-backend = "setuptools.build_meta"
 
 name = "citkid"
 version = "0.0"
-description = "Kinetic Inductance Detector data acquisition and analysis"
+description = "Fork of Logan Foote's citkid for TIM KID analysis"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {file = "LICENSE.txt"}
 keywords = ["kinetic inductance detector"]
 
   authors = [
-    {name = "Logan Foote", email = "lfoote@caltech.edu"}
+    {name = "Logan Foote", email = "lfoote@caltech.edu"},
+    {name = "Shubh Agrawal", email = "shubh@sas.upenn.edu"}
   ]
 
   maintainers = [
-    {name = "Logan Foote", email = "lfoote@caltech.edu"}
+    {name = "Logan Foote", email = "lfoote@caltech.edu"},
+    {name = "Shubh Agrawal", email = "shubh@sas.upenn.edu"}
   ]
 
 classifiers = [
@@ -42,12 +44,14 @@ dependencies = [
   "matplotlib",
   "pyfftw",
   "numba",
-  "paramiko"
+  "paramiko",
+  "tqdm",
+  "redis",
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/loganfoote/citkid"
-"Bug Reports" = "https://github.com/loganfoote/citkid/issues"
+"Homepage" = "https://github.com/shubhagrawal30/citkid"
+"Bug Reports" = "https://github.com/shubhagrawal30/citkid/issues"
 
 [tool.setuptools]
 package-data = {}

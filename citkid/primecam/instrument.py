@@ -9,6 +9,7 @@ import paramiko
 import numpy as np
 from ..util import fix_path
 from . import _config
+import gc
 
 class RFSOC:
     def __init__(self, out_directory, bid = 1, drid = 1,
@@ -26,7 +27,7 @@ class RFSOC:
         """
         # Create tmp and log directories
         directory = fix_path(os.getcwd())
-        self.tmp_directory = directory + 'tmp/'
+        self.tmp_directory = directory + 'tmp/' #+ 'drone' + str(drid) + '/'
         self.log_directory = '/'.join(directory.split('/')[:-2]) + '/'+ 'logs/'
         for d in (self.tmp_directory, self.log_directory):
             os.makedirs(d, exist_ok = True)
@@ -53,6 +54,9 @@ class RFSOC:
         # Bind socket for noise
         if noiseq:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # let multiple binds
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
             self.sock.bind((udp_ip, 4096))
         self.sample_time = 5 / 2441
 
@@ -523,11 +527,11 @@ def capturePacket(sock):
     Returns:
     packet (np.array): captured data
     """
-    byteshift = -1
-    data = sock.recv(9000) # buffer size is 1024 bytes
+    data = sock.recv(9000) # buffer size is 9000 bytes
     data = bytearray(data)
-    data = np.roll(data,byteshift)
-    return np.frombuffer(data, dtype="<i").astype("float")
+    i, f = 0, 8191
+    data = np.frombuffer(data[i:f+1], dtype="<i4").astype("float")
+    return data
 
 def getNpackets(sock, N):
     """
@@ -541,6 +545,6 @@ def getNpackets(sock, N):
     I (np.array): each element is an array of I values for the respective tone
     Q (np.array): each element is an array of q values for the respective tone
     """
-    p = np.array([capturePacket(sock) for p in range(N)])
-    I, Q = p[:, 16::2].T, p[:, 17::2].T
-    return I, Q
+    ps = np.array([capturePacket(sock) for p in range(N)])
+    I, Q = np.array([p[0::2] for p in ps]), np.array([p[1::2] for p in ps])
+    return I.T, Q.T
