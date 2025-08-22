@@ -53,6 +53,9 @@ class RFSOC:
         # Bind socket for noise
         if noiseq:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # let multiple binds
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
             self.sock.bind((udp_ip, 4096))
         self.sample_time = 5 / 2441
 
