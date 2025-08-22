@@ -26,7 +26,7 @@ class RFSOC:
         """
         # Create tmp and log directories
         directory = fix_path(os.getcwd())
-        self.tmp_directory = directory + 'tmp/' + 'drone' + str(drid) + '/'
+        self.tmp_directory = directory + 'tmp/' #+ 'drone' + str(drid) + '/'
         self.log_directory = '/'.join(directory.split('/')[:-2]) + '/'+ 'logs/'
         for d in (self.tmp_directory, self.log_directory):
             os.makedirs(d, exist_ok = True)
@@ -457,11 +457,12 @@ def capturePacket(sock):
     Returns:
     packet (np.array): captured data
     """
-    byteshift = -1
-    data = sock.recv(9000) # buffer size is 1024 bytes
+    # byteshift = -1
+    data = sock.recv(9000) # buffer size is 9000 bytes
     data = bytearray(data)
-    data = np.roll(data,byteshift)
-    return np.frombuffer(data, dtype="<i").astype("float")
+    i, f = 0, 8191
+    data = np.frombuffer(data[i:f+1], dtype="<i4").astype("float")
+    return data
 
 def getNpackets(sock, N):
     """
@@ -475,6 +476,6 @@ def getNpackets(sock, N):
     I (np.array): each element is an array of I values for the respective tone
     Q (np.array): each element is an array of q values for the respective tone
     """
-    p = np.array([capturePacket(sock) for p in range(N)])
-    I, Q = p[:, 16::2].T, p[:, 17::2].T
-    return I, Q
+    ps = np.array([capturePacket(sock) for p in range(N)])
+    I, Q = np.array([p[0::2] for p in ps]), np.array([p[1::2] for p in ps])
+    return I.T, Q.T
