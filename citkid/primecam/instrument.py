@@ -9,6 +9,7 @@ import paramiko
 import numpy as np
 from ..util import fix_path
 from . import _config
+import gc
 
 class RFSOC:
     def __init__(self, out_directory, bid = 1, drid = 1,
@@ -26,7 +27,7 @@ class RFSOC:
         """
         # Create tmp and log directories
         directory = fix_path(os.getcwd())
-        self.tmp_directory = directory + 'tmp/' + 'drone' + str(drid) + '/'
+        self.tmp_directory = directory + 'tmp/' #+ 'drone' + str(drid) + '/'
         self.log_directory = '/'.join(directory.split('/')[:-2]) + '/'+ 'logs/'
         for d in (self.tmp_directory, self.log_directory):
             os.makedirs(d, exist_ok = True)
@@ -37,11 +38,12 @@ class RFSOC:
         sys.path.insert(1,
             os.path.abspath(os.path.expanduser(local_primecam_path)))
         from queen import alcoveCommand
-        from alcove_commands.tones import genPhis
+        from alcove_commands.tones import genAmpsAndPhis, genPhis
         from alcove import comNumFromStr
         from alcove_commands.board_io import file
         self.comNumFromStr = comNumFromStr
         self.alcoveCommand = alcoveCommand
+        self.genAmpsAndPhis = genAmpsAndPhis
         self.genPhis = genPhis
         self.bfile = file
         # Set system variables
@@ -52,6 +54,9 @@ class RFSOC:
         # Bind socket for noise
         if noiseq:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # let multiple binds
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
             self.sock.bind((udp_ip, 4096))
         self.sample_time = 5 / 2441
 
@@ -372,14 +377,16 @@ class RFSOC:
         ssh = paramiko.SSHClient()
         ssh.load_system_host_keys()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        # Connect to the xilinx board
+        # Connect to the xilinx board, ssh key or password
         hostname = _config.xilinx_ip
         port = _config.xilinx_sshport
         username = _config.xilinx_username
         password = _config.xilinx_password
+        key_path = _config.xilinx_key_path
         git_path = _config.xilinx_git_path
+
         if attmpt_scp:
-            ssh.connect(hostname, port, username, password)
+            ssh.connect(hostname, port, username, password, key_filename=key_path)
             # Transfer files to the board
             scp = ssh.open_sftp()
         files = ['custom_freqs.npy', 'custom_amps.npy', 'custom_phis.npy']
@@ -396,6 +403,18 @@ class RFSOC:
             scp.close()
         ssh.close()
 
+    def _get_if(self, fres):
+        """
+        Convert resonator frequencies to IF (intermediate frequencies) in Hz.
+
+        Parameters:
+        fres (np.array): Resonator frequencies in Hz
+
+        Returns:
+        np.array: IF frequencies in Hz
+        """
+        return np.array(fres) - self.lo_freq * 1e6
+
     def make_custom_tone_lists(self, fres, ares = None, pres = None, attmpt_scp=True):
         """
         Creates custom amplitude and phi lists from the give tone list, and
@@ -411,15 +430,83 @@ class RFSOC:
         amp_max = (2 ** 15 - 1)
         fres = np.array(fres)
         if ares is None:
-            N = len(fres)
-            ares = np.ones(N) * amp_max / np.sqrt(N) * 0.25
-        if pres is None:
-            pres = self.genPhis(fres * 1e-6, ares)
+            ares, pres = self.genAmpsAndPhis(self._get_if(fres))
+        elif pres is None:
+            pres = self.genPhis(self._get_if(fres), ares)
         for file, res in zip(['custom_freqs.npy', 'custom_amps.npy',
                               'custom_phis.npy'],
                              [fres, ares, pres]):
             np.save(self.tmp_directory + file, res)
         self.transfer_custom_tone_lists(attmpt_scp=attmpt_scp)
+
+    def set_atten(self, atten, direction):
+        """
+        Set the attenuation value for the specified direction.
+
+        Parameters:
+        atten (float): The attenuation value to set, in 0.25 dB increments (range: 0 to 31.75 dB).
+        direction (str): The direction for attenuation. Use 'drive' for the DAC side (signal output from RFSoC),
+                         or 'sense' for the DAC side (signal returning to RFSoC).
+        """
+        # Use the new attenuator board hardware command
+        com_num = self.comNumFromStr('setAtten2025')
+        args = str('direction=%s,atten=%1.2f' % (direction, atten))
+
+        with hidePrints():
+            response = self.alcoveCommand(com_num, bid=self.bid, drid=self.drid, 
+                                    all_boards=False, args=args)
+
+    def get_atten(self, direction):
+        """
+        Retrieve the attenuation value for the specified direction.
+
+        Parameters:
+            direction (str): Attenuation direction. Use 'drive' for the DAC side (signal output from RFSoC),
+                             or 'sense' for the ADC side (signal returning to RFSoC).
+
+        Returns:
+            float: The attenuation value in 0.25 dB increments (range: 0 to 31.75 dB).
+        """
+        com_num = self.comNumFromStr('getAtten')
+        args = str('direction=%s'%(direction))
+
+        with hidePrints():
+            response = self.alcoveCommand(com_num, bid=self.bid, drid=self.drid, 
+                                    all_boards=False, args=args)
+
+        # Extract the attenuation value from the response buffer
+        data_bytes = response[1][0]['data'][12:20]
+        atten = float(np.frombuffer(data_bytes, dtype='>f8')[0])
+        
+        # Handle the uninitialized state that occurs after an RFSoC restart
+        if np.isclose(atten, 63.75):
+            return -1
+        return atten
+
+    def get_adc_rms(self):
+        """
+        Retrieve the RMS value of the ADC.
+
+        Returns:
+            float: The RMS value of the ADC.
+        """
+        com_num = self.comNumFromStr('getADCrms')
+        args = None
+
+        with hidePrints():
+            response = self.alcoveCommand(com_num, bid=self.bid, drid=self.drid, 
+                                    all_boards=False, args=args)
+
+        #Extract the RMS value from the response buffer
+        try:
+            import pickle
+            data_bytes = response[1][0]['data']
+            adc_rms = float(np.abs(pickle.loads(data_bytes)))
+        except Exception as e:
+            print(f"Error extracting ADC RMS: {e}")
+            adc_rms = -1
+        
+        return adc_rms
 
 def separate_iq_data(path):
     """
@@ -457,11 +544,11 @@ def capturePacket(sock):
     Returns:
     packet (np.array): captured data
     """
-    byteshift = -1
-    data = sock.recv(9000) # buffer size is 1024 bytes
+    data = sock.recv(9000) # buffer size is 9000 bytes
     data = bytearray(data)
-    data = np.roll(data,byteshift)
-    return np.frombuffer(data, dtype="<i").astype("float")
+    i, f = 0, 8191
+    data = np.frombuffer(data[i:f+1], dtype="<i4").astype("float")
+    return data
 
 def getNpackets(sock, N):
     """
@@ -475,6 +562,6 @@ def getNpackets(sock, N):
     I (np.array): each element is an array of I values for the respective tone
     Q (np.array): each element is an array of q values for the respective tone
     """
-    p = np.array([capturePacket(sock) for p in range(N)])
-    I, Q = p[:, 16::2].T, p[:, 17::2].T
-    return I, Q
+    ps = np.array([capturePacket(sock) for p in range(N)])
+    I, Q = np.array([p[0::2] for p in ps]), np.array([p[1::2] for p in ps])
+    return I.T, Q.T

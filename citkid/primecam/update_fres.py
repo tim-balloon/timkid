@@ -1,6 +1,6 @@
 import numpy as np
 def update_fres(f, z, npoints, fcal_indices = [], method = 'mins21',
-                    cut_other_resonators = False, fres = None, Qres = None):
+                    cut_other_resonators = False, fres = None, qres = None):
     """
     Give a multitone rough sweep dataset, return the updated resonance
     frequencies
@@ -17,11 +17,11 @@ def update_fres(f, z, npoints, fcal_indices = [], method = 'mins21',
         point. 'none' to return the center of each sweep.
     cut_other_resonators (bool): if True, cuts other resonators out of each
         sweep before updating the tone. Other resonators are defined using
-        fres and Qres
+        fres and qres
     fres (np.array or None): list of resonance frequencies in Hz if
         cut_other_resonators, or None
-    Qres (np.array or None): list of quality factors to cut if
-        cut_other_resonators, or None. Cuts spans of fres / Qres from each
+    qres (np.array or None): list of quality factors to cut if
+        cut_other_resonators, or None. Cuts spans of fres / qres from each
         sweep
 
     Returns:
@@ -48,7 +48,7 @@ def update_fres(f, z, npoints, fcal_indices = [], method = 'mins21',
         fi, zi = f[i0:i1], z[i0:i1]
         if i not in fcal_indices:
             if cut_other_resonators:
-                spans = fres / Qres
+                spans = fres / qres
                 fi, zi = cut_fine_scan(fi, zi, fres, spans)
             fres_new.append(update(fi, zi))
         else:

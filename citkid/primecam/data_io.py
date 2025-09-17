@@ -31,7 +31,7 @@ def import_iq_noise(directory, file_suffix, import_noiseq = True):
         fres_initial = None
     fres = np.load(directory + f'fres{file_suffix}.npy')
     ares = np.load(directory + f'ares{file_suffix}.npy')
-    Qres = np.load(directory + f'Qres{file_suffix}.npy')
+    Qres = np.load(directory + f'qres{file_suffix}.npy')
     fcal_indices = np.load(directory + f'fcal_indices{file_suffix}.npy')
     # sweeps
     path = directory + f's21_rough{file_suffix}.npy'
