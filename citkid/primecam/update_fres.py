@@ -48,7 +48,7 @@ def update_fres(f, z, npoints, fcal_indices = [], method = 'mins21',
         fi, zi = f[i0:i1], z[i0:i1]
         if i not in fcal_indices:
             if cut_other_resonators:
-                spans = fres / qres
+                spans = fres / (2*qres)
                 fi, zi = cut_fine_scan(fi, zi, fres, spans)
             fres_new.append(update(fi, zi))
         else:

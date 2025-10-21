@@ -89,7 +89,7 @@ def optimize_ares(rfsoc, fres, ares, qres, fcal_indices, max_dbm = -50,
                   a_target = 0.5, n_iterations = 10, n_addonly = 3,
                   fine_bw = 0.2, fres_update_method = 'distance',
                   npoints_gain = 50, npoints_fine = 400, plot_directory = None,
-                  verbose = False, N_accums = 5):
+                  verbose = False, N_accums = 5, cut_other_resonators = True):
     """
     Optimize tone powers using by iteratively fitting IQ loops and using a_nl
     of each fit to scale each tone power
@@ -165,7 +165,7 @@ def optimize_ares(rfsoc, fres, ares, qres, fcal_indices, max_dbm = -50,
         f, i, q = np.load(rfsoc.out_directory + f's21_fine_{file_suffix}.npy')
         fres = update_fres(f, i + 1j * q, len(f) // len(fres),
                            fcal_indices = fcal_indices, method = fres_update_method,
-                        cut_other_resonators =True, fres = fres, qres = qres)
+                        cut_other_resonators=cut_other_resonators, fres = fres, qres = qres)
         # for the last iteration, save the updated ares list
         if idx0 == len(fres) - 1:
             np.save(rfsoc.out_directory + f'ares_{idx0 + 1:02d}', ares)
