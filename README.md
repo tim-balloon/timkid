@@ -1,5 +1,7 @@
-# Fork of CIT KID package for TIM development
+# A Compilation of In-Lab KID Testing Code for the Terahertz Intensity Mapper
+Fork of CIT KID package 
 
+---------------------------------
 
 # Kinetic Inductance Detector data acquisition and analysis
 Collection of Kinetic Inductance Detector (KID) data acquisition and analysis code. Currently implemented analyses are:
