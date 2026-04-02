@@ -1,5 +1,5 @@
 # A Compilation of In-Lab KID Testing Code for the Terahertz Intensity Mapper
-Fork of CIT KID package 
+Fork of CIT KID package. This version is compatible with the TIM readout software and implements improved and automated routines.
 
 ---------------------------------
 
