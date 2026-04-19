@@ -4,7 +4,7 @@ from .update_ares import get_rfsoc_power, update_ares_pscale, update_ares_addonl
 from .update_fres import update_fres
 from .data_io import import_iq_noise
 from .analysis import fit_iq
-from .plot import plot_ares_opt
+from .plot import plot_ares_opt, save_ares_history_plot, save_christmas_plot
 from ..util import save_fig
 import os
 
@@ -170,6 +170,140 @@ def optimize_ares(rfsoc, fres, ares, qres, fcal_indices, max_dbm = -50,
         if idx0 == len(fres) - 1:
             np.save(rfsoc.out_directory + f'ares_{idx0 + 1:02d}', ares)
 
+def optimize_ares_siq(rfsoc, fres, ares_min, ares_max, ares_cal, qres, fcal_indices, threshold,
+                  n_iterations=10, fine_bw=0.2, fres_update_method='distance',
+                  npoints_gain=50, npoints_fine=400, plot_directory=None,
+                  verbose=False, N_accums=5, cut_other_resonators=True):
+    """
+    Optimize tone powers by looking at the gap in the IQ loops to determine bifurcation.
+
+    The routine frequency-sweeps the current set of resonators, classifies each
+    resonator as bifurcated or not, and updates ares by a
+    binary-search procedure over multiple iterations. Diagnostic plots and
+    updated fine-sweep frequencies can optionally be produced at each step.
+
+    Parameters
+    ----------
+    rfsoc: citkid.primecam.instrument.RFSOC RFSOC instance
+    fres : array-like
+        Initial resonator center frequencies [Hz].
+    ares_min : float
+        Lower limit of the amplitude in RFSoC units.
+    ares_max : float
+        Upper limit of the amplitude in RFSoC units.
+    ares_cal : float
+        Fixed drive amplitude assigned to calibration tones in RFSoC units.
+    qres : array-like
+        Resonator quality-factor estimates. Should be the same size as fres.
+    fcal_indices : sequence of int
+        Indices of calibration tones that should not be optimized.
+    threshold : float
+        Threshold used by ``_is_bifurcated`` to classify each sweep.
+    n_iterations : int, optional
+        Number of optimization iterations to perform. Default value 10.
+    fine_bw : float, optional
+        Fine sweep bandwidth [MHz].
+    fres_update_method : str or None, optional
+        Method for updating frequencies. See update_fres.
+    npoints_gain : int, optional
+        number of points in the gain sweep
+    npoints_fine : int, optional
+        number of points in the fine sweep
+    plot_directory : str or path-like, optional
+        Output directory for diagnostic figures. If omitted, no plots are saved.
+    verbose : bool, optional
+        If ``True``, display a progress bar during the optimization.
+    N_accums : int, optional
+        number of accumulations for the target sweeps
+    cut_other_resonators : bool, optional
+        Forwarded to ``update_fres`` when frequency updates are enabled.
+
+    Returns
+    -------
+    None
+        Results are currently communicated through saved files and in-place
+        workflow side effects rather than a structured return value.
+    """
+    import os
+    from tqdm.auto import tqdm
+    
+    if (plot_directory is not None) and (not os.path.exists(plot_directory)):
+        os.makedirs(plot_directory)
+
+    fres, qres = np.array(fres), np.array(qres)
+    pbar0 = list(range(n_iterations))
+    if verbose:
+        pbar0 = tqdm(pbar0, leave = False)
+    fit_idx = [i for i in range(len(fres)) if i not in fcal_indices]
+
+    ares = np.full_like(fres, fill_value=ares_min)
+    
+    ares[fcal_indices] = ares_cal
+    
+    theta_list = np.zeros_like(fres, dtype=float)
+    
+    ares_0_list = ares.copy()
+    ares_1_list = np.full_like(fres, fill_value=ares_max)
+    ares_1_list[fcal_indices] = ares_cal
+    ares_history = np.ones(shape=(len(fres), n_iterations), dtype=float)
+    state_history = np.zeros(shape=(len(fres), n_iterations), dtype=bool)       # True if bifurcated
+    
+    # Do a binary search in ares to set resonators just below bifurcation.
+    for idx0 in pbar0:
+        if verbose:
+            pbar0.set_description('sweeping')
+        file_suffix = f'{idx0:02d}'
+        
+        take_iq_noise(rfsoc, fres, ares, qres, fcal_indices, file_suffix,
+                  noise_time=None, fine_bw=fine_bw,
+                  take_rough_sweep=False, npoints_gain=npoints_gain,
+                  npoints_fine=npoints_fine, N_accums=N_accums)
+        np.save(rfsoc.out_directory + f'ares_{file_suffix}', ares)
+        
+        # Determining bifurcation
+        if verbose:
+            pbar0.set_description('bifurcated?')
+
+        if idx0 == 0:
+            f, I, Q = np.load(rfsoc.out_directory + f's21_fine_{file_suffix}.npy')
+
+            N_tone = len(fres)
+            N_per_tone = len(f) // N_tone
+
+        _update_ares_for_iteration(
+            idx0,
+            rfsoc.out_directory + f's21_fine_{file_suffix}.npy',
+            N_tone,
+            N_per_tone,
+            fcal_indices,
+            ares,
+            ares_max,
+            ares_0_list,
+            ares_1_list,
+            theta_list,
+            ares_history,
+            state_history,
+            threshold,
+        )
+
+        if plot_directory is not None:
+            # christmas plot
+            save_christmas_plot(idx0, state_history, fit_idx, plot_directory)
+            # ares plot
+            save_ares_history_plot(idx0, ares_history, fit_idx, plot_directory)
+
+        # update fres
+        if (fres_update_method != 'None') and (fres_update_method != None):
+            f, i, q = np.load(rfsoc.out_directory + f's21_fine_{file_suffix}.npy')
+            fres = update_fres(f, i + 1j * q, len(f) // len(fres),
+                        fcal_indices=fcal_indices, method=fres_update_method,
+                        cut_other_resonators=cut_other_resonators, fres=fres, qres=qres)
+            
+            if verbose:
+                print("fres updated.")
+
+    return
+
 ################################################################################
 ######################### Utility functions ####################################
 ################################################################################
@@ -225,3 +359,253 @@ def make_cal_tones(fres, ares, qres, max_n_tones = 1000,
         new_index = new_resonator_indices_start + fcal_index
         new_resonator_indices = np.insert(new_resonator_indices, fres_index, new_index)
     return fres, ares, qres, fcal_indices, new_resonator_indices
+
+def _fit_circle_geometric(x, y):
+    """
+    Fit a circle to planar data using nonlinear least squares.
+
+    Parameters
+    ----------
+    x, y : array-like
+        Coordinates of the points to fit.
+
+    Returns
+    -------
+    np.ndarray
+        Best-fit ``[x_center, y_center, radius]``.
+    """
+    from scipy.optimize import least_squares
+    x = np.asarray(x)
+    y = np.asarray(y)
+
+    def residuals(params):
+        xc, yc, r = params
+        return np.sqrt((x - xc)**2 + (y - yc)**2) - r
+
+    # Initial guess
+    x0 = [np.mean(x), np.mean(y), np.std(x)]
+
+    result = least_squares(residuals, x0)
+    return result.x
+
+def _get_theta(f, I, Q):
+    """
+    Estimate the rotation angle needed to align an IQ loop.
+
+    The input sweep is amplitude-normalized, phase-normalized, and corrected
+    for an approximately linear phase slope before fitting the loop geometry.
+
+    Parameters
+    ----------
+    f : array-like
+        Fine sweep frequencies for one resonator.
+    I, Q : array-like
+        In-phase and quadrature sweep samples.
+
+    Returns
+    -------
+    float
+        Angle, in radians, used to rotate the loop into a standard frame.
+    """
+    S21 = I+1j*Q
+
+    mag_lin = np.abs(S21)   # magnitude of S21
+    phi = np.angle(S21)     # phase of S21
+
+    # normalize to same baseline amplitude
+    S21 /= np.mean(mag_lin[:20])
+
+    # normalize to same baseline phase
+    S21 *= np.exp(-1j * np.median(phi[:20]))
+    
+    # remove linear phase
+    phi = np.angle(S21)
+    phi_1 = phi[10]
+    phi_2 = phi[-10]
+    slope = (phi_2-phi_1)/(f[-10]-f[10])            # fit to line
+    S21 *= np.exp(-1j * (slope*(f-f[10])+phi_1))
+    
+    I, Q = np.real(S21), np.imag(S21)
+    phi = np.angle(S21)
+
+    I_c, Q_c, _ = _fit_circle_geometric(I, Q)
+    I_off = np.median(np.concat((I[:10], I[-10:])))
+    Q_off = np.median(np.concat((Q[:10], Q[-10:])))
+    theta = np.atan2(Q_off-Q_c, I_off-I_c)
+
+    return theta
+
+def _transform_to_unit_circle(f, I, Q, theta):
+    """
+    Normalize and rotate an IQ loop onto an approximate unit circle.
+
+    The transformed loop is shifted so the off-resonance point lies near
+    ``(1, 0)`` and the fitted circle is centered at the origin with unit radius.
+
+    Parameters
+    ----------
+    f : array-like
+        Fine sweep frequencies for one resonator.
+    I, Q : array-like
+        In-phase and quadrature sweep samples.
+    theta : float
+        Rotation angle returned by ``_get_theta``.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Transformed I and Q coordinates on the normalized unit circle..
+    """
+    S21 = I+1j*Q
+
+    mag_lin = np.abs(S21)   # magnitude of S21
+    phi = np.angle(S21)     # phase of S21
+
+    # normalize to same baseline amplitude
+    S21 /= np.mean(mag_lin[:20])
+
+    # normalize to same baseline phase
+    S21 *= np.exp(-1j * np.median(phi[:20]))
+    
+    # remove linear phase
+    phi = np.angle(S21)
+    phi_1 = phi[10]
+    phi_2 = phi[-10]
+    slope = (phi_2-phi_1)/(f[-10]-f[10])            # fit to line
+    S21 *= np.exp(-1j * (slope*(f-f[10])+phi_1))
+    
+    I, Q = np.real(S21), np.imag(S21)
+    phi = np.angle(S21)
+
+    # rotate the circle around (1, 0) so that center is on real axis and off-resonance is at (1,0)
+    I_off = np.median(np.concat((I[:10], I[-10:])))
+    Q_off = np.median(np.concat((Q[:10], Q[-10:])))
+    I -= I_off
+    Q -= Q_off
+    
+    S21 = I + 1j*Q
+    S21 *= np.exp(-1j*theta)    # rotate so that on-resonance is on real axis
+    I = np.real(S21) + 1        # shift off-resonance back to (1, 0)
+    Q = np.imag(S21)
+    S21 = I + 1j*Q
+
+    # using algebra to find the center
+    I1 = 1
+    Q1 = 0
+    I2 = I[np.argmin(S21)]
+    Q2 = Q[np.argmin(S21)]
+    Ic = 0.5*(I1+I2) + 0.5*((Q2-Q1)**2)/(I2-I1) # center of the circle
+    Qc = 0                                      # center of the circle
+    radius = I1-Ic
+
+    # shift the center to (0, 0)
+    I -= Ic
+    Q -= Qc
+    # normalize the circle to unit circle
+    I /= radius
+    Q /= radius
+    
+    return I, Q
+
+def _is_bifurcated(f, I, Q, theta, threshold, medfilter_size=51):
+    """
+    Detect whether a resonator sweep appears bifurcated.
+
+    The decision is based on the frequency derivative of the normalized IQ loop
+    relative to a median-filtered baseline.
+
+    Parameters
+    ----------
+    f : array-like
+        Fine sweep frequencies for one resonator.
+    I, Q : array-like
+        In-phase and quadrature sweep samples.
+    theta : float
+        Rotation angle used to normalize the loop geometry.
+    threshold : float
+        Detection threshold applied to the filtered derivative ratio.
+    medfilter_size : int, optional
+        Median filter window used to estimate the baseline derivative scale.
+
+    Returns
+    -------
+    bool
+        ``True`` if the resonator is classified as bifurcated.
+    """
+    from scipy.ndimage import median_filter
+
+    I, Q = _transform_to_unit_circle(f, I, Q, theta)
+    
+    # find the distance between to points in the IQ circle
+    df = f[1]-f[0]
+    dI = np.diff(I)/df
+    dQ = np.diff(Q)/df
+    dIQ = np.sqrt(dI**2 + dQ**2)
+    
+    riq = dIQ/median_filter(dIQ, medfilter_size)
+
+    return np.max(riq) > threshold
+
+
+def _update_ares_for_iteration(idx0, file_path, N_tone, N_per_tone, fcal_indices,
+                               ares, ares_max, ares_0_list, ares_1_list,
+                               theta_list, ares_history, state_history, threshold):
+    """
+    Update resonator states and next-step drive amplitudes for one iteration.
+
+    Parameters
+    ----------
+    idx0 : int
+        Current iteration index.
+    file_path : str or path-like
+        Path to the saved fine sweep file for this iteration.
+    N_tone : int
+        Total number of tones in the sweep.
+    N_per_tone : int
+        Number of fine sweep samples stored for each tone.
+    fcal_indices : sequence of int
+        Indices of calibration tones that should be skipped.
+    ares : np.ndarray
+        Current resonator drive amplitudes. Updated in place.
+    ares_max : float
+        Maximum allowed resonator drive amplitude.
+    ares_0_list, ares_1_list : np.ndarray
+        Lower and upper amplitude bounds used by the search.
+    theta_list : np.ndarray
+        Cached rotation angles for each resonator.
+    ares_history : np.ndarray
+        History array populated in place with tested amplitudes.
+    state_history : np.ndarray
+        History array populated in place with bifurcation states.
+    threshold : float
+        Bifurcation detection threshold.
+    """
+    f, I, Q = np.load(file_path)
+    for res_idx in range(N_tone):
+        if res_idx in fcal_indices:
+            continue
+
+        i_beg = N_per_tone*res_idx
+        i_end = N_per_tone*(res_idx+1)
+        f_fine = f[i_beg:i_end]
+        I_fine = I[i_beg:i_end]
+        Q_fine = Q[i_beg:i_end]
+
+        ares_history[res_idx, idx0] = ares[res_idx]
+
+        if idx0 == 0:
+            theta_list[res_idx] = _get_theta(f_fine, I_fine, Q_fine)
+
+        state = _is_bifurcated(f_fine, I_fine, Q_fine, theta_list[res_idx], threshold=threshold)
+        state_history[res_idx, idx0] = state
+
+        if idx0 == 0:
+            ares[res_idx] = ares_max
+        elif idx0 == 1:
+            ares[res_idx] = np.sqrt(ares_0_list[res_idx] * ares_1_list[res_idx])
+        else:
+            if state:
+                ares_1_list[res_idx] = ares[res_idx]
+            else:
+                ares_0_list[res_idx] = ares[res_idx]
+            ares[res_idx] = np.sqrt(ares_0_list[res_idx] * ares_1_list[res_idx])
