@@ -45,3 +45,54 @@ def plot_ares_opt(a_nls, fcal_indices):
         percents.append(percent)
     ax_opt.plot(indices, percents, '--k')
     return fig_hist, fig_opt
+
+def save_christmas_plot(idx0, state_history, fit_idx, plot_directory):
+    """
+    Save the iteration-by-resonator bifurcation state plot.
+
+    Parameters
+    ----------
+    idx0 : int
+        Current iteration index.
+    state_history : np.ndarray
+        Boolean array storing bifurcation state by resonator and iteration.
+    fit_idx : sequence of int
+        Resonator indices included in the optimization.
+    plot_directory : str or path-like
+        Directory where the figure should be written.
+    """
+    iter_range = np.array(range(idx0+1), dtype=int)
+    fig, ax = plt.subplots(figsize=(12, 6))
+    for i in range(len(fit_idx)):
+        ax.scatter(np.array([i]*(idx0+1))[ state_history[i, :idx0+1]], iter_range[ state_history[i, :idx0+1]], c='r', marker='o')
+        ax.scatter(np.array([i]*(idx0+1))[~state_history[i, :idx0+1]], iter_range[~state_history[i, :idx0+1]], c='g', marker='x')
+    ax.set_xlabel('KID Index')
+    ax.set_ylabel('Iteration')
+
+    plt.savefig(plot_directory+'/christmas.png', dpi=80, bbox_inches='tight')
+    plt.close()
+
+def save_ares_history_plot(idx0, ares_history, fit_idx, plot_directory):
+    """
+    Save the resonator drive history accumulated so far.
+
+    Parameters
+    ----------
+    idx0 : int
+        Current iteration index.
+    ares_history : np.ndarray
+        Drive amplitude history indexed by resonator and iteration.
+    fit_idx : sequence of int
+        Resonator indices included in the optimization.
+    plot_directory : str or path-like
+        Directory where the figure should be written.
+    """
+    iter_range = np.array(range(idx0+1), dtype=int)
+    fig, ax = plt.subplots(figsize=(8, 6))
+    for i, kid_idx in enumerate(fit_idx):
+        ax.plot(iter_range, ares_history[kid_idx, iter_range], marker='o', alpha=0.5)
+    ax.set_yscale('log')
+    ax.set_xlabel('Iteration')
+    ax.set_ylabel('ares')
+    fig.savefig(plot_directory+'/ares_history.png', dpi=80, bbox_inches='tight')
+    plt.close()
